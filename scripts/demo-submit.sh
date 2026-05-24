@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Armada multi-pool demo: submit jobs to slurm, armada, and default pools.
+# Armada multi-pool demo: submit jobs to slurm and armada pools.
 # Usage:
 #   ./demo-submit.sh individual   - one job per pool
-#   ./demo-submit.sh mixed        - batch of jobs across all pools
+#   ./demo-submit.sh mixed        - batch of jobs across both pools
 #   ./demo-submit.sh all          - both of the above (default)
 
 set -euo pipefail
@@ -54,10 +54,6 @@ submit_individual() {
   echo ""
   echo "→ Pool: armada  (routed to plain K8s cluster)"
   submit_job armada armada-job 60
-
-  echo ""
-  echo "→ Pool: default  (scheduled across all capacity, fair-share)"
-  submit_job default default-job 60
 
   echo ""
   echo "Individual jobs submitted. View at: http://5.78.201.87:3000"
@@ -127,34 +123,6 @@ jobs:
           image: busybox:1.36
           command: [sh, -c]
           args: ["echo armada batch 2; sleep 60"]
-          resources:
-            requests: {cpu: 100m, memory: 64Mi}
-            limits:   {cpu: 100m, memory: 64Mi}
-  - priority: 1
-    namespace: armada
-    podSpec:
-      terminationGracePeriodSeconds: 0
-      nodeSelector:
-        armadaproject.io/pool: default
-      containers:
-        - name: default-batch-1
-          image: busybox:1.36
-          command: [sh, -c]
-          args: ["echo default batch 1; sleep 60"]
-          resources:
-            requests: {cpu: 100m, memory: 64Mi}
-            limits:   {cpu: 100m, memory: 64Mi}
-  - priority: 1
-    namespace: armada
-    podSpec:
-      terminationGracePeriodSeconds: 0
-      nodeSelector:
-        armadaproject.io/pool: default
-      containers:
-        - name: default-batch-2
-          image: busybox:1.36
-          command: [sh, -c]
-          args: ["echo default batch 2; sleep 60"]
           resources:
             requests: {cpu: 100m, memory: 64Mi}
             limits:   {cpu: 100m, memory: 64Mi}
