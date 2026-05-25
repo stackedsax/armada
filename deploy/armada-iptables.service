@@ -1,0 +1,12 @@
+[Unit]
+Description=Armada demo DNAT rules (kind-armada-server NodePorts)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/armada/deploy/apply-iptables.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
