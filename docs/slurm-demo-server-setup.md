@@ -254,6 +254,11 @@ kind create cluster --name slurm-executor --config /tmp/kind-slurm-executor.yaml
 The last two workers are dedicated to Slurm; the other two handle Armada's executor pod
 and system workloads.
 
+**Do this before installing Slurm.** The Slurm controller is a StatefulSet with a PVC;
+the local-path provisioner binds the PVC to whichever node the pod first schedules on.
+If the taint is applied after Slurm is installed, the PVC may bind to a tainted node,
+and the controller will be stuck `Pending` forever whenever it restarts.
+
 ```bash
 for node in $(kubectl --context kind-slurm-executor get nodes -o name | grep worker | tail -2); do
   kubectl --context kind-slurm-executor label $node \

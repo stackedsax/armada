@@ -15,26 +15,22 @@ algorithm: it bin-packs until one cluster fills up, then spills over to the seco
 ## Architecture
 
 ```
-                        ┌─────────────────────────┐
-                        │      armada-server       │
-                        │  (Armada control plane)  │
-                        │                          │
-                        │  pools:                  │
-                        │   slurm  (skipNodeBinding│
-                        │   armada (standard K8s)  │
-                        └────────────┬─────────────┘
-                                     │ gRPC :50051
-               ┌─────────────────────┼──────────────────────┐
-               │                     │                      │
-   ┌───────────▼──────────┐  ┌───────▼──────────┐  ...more clusters
-   │   slurm-executor     │  │  slurm-executor-2 │
-   │  (Slurm + bridge)    │  │  (Slurm + bridge) │
-   └──────────────────────┘  └──────────────────┘
-
-   ┌──────────────────────┐  ┌───────────────────┐
-   │   armada-executor    │  │  armada-executor-2 │
-   │  (plain K8s)         │  │  (plain K8s)       │
-   └──────────────────────┘  └───────────────────┘
+                        ┌────────────────────────────┐
+                        │      armada-server         │
+                        │  (Armada control plane)    │
+                        │                            │
+                        │  pools:                    │
+                        │   slurm  (skipNodeBinding) │
+                        │   armada (standard K8s)    │
+                        └──────────────┬─────────────┘
+                                       │ gRPC :50051
+          ┌───────────────────┬────────┴────────┬───────────────────┐
+          │                   │                 │                   │
+┌─────────▼────────┐  ┌───────▼──────────┐  ┌───▼──────────────┐  ┌─▼─────────────────┐
+│  slurm-executor  │  │ slurm-executor-2 │  │  armada-executor │  │ armada-executor-2 │
+│ (Slurm + bridge) │  │ (Slurm + bridge) │  │  (plain K8s)     │  │ (plain K8s)       │
+└──────────────────┘  └──────────────────┘  └──────────────────┘  └───────────────────┘
+        ...more clusters can be added to either pool
 ```
 
 ## Hosted demo
