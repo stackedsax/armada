@@ -199,9 +199,40 @@ HELMEOF
   kind load docker-image slurm-bridge-controllers:dev --name "${cluster}"
   kind load docker-image slurm-bridge-admission:dev   --name "${cluster}"
 
+  # Create slinky namespace and Token CR before slurm-bridge install.
+  # slurm-operator (already running) watches Token CRs and creates the slurm-bridge-token
+  # secret. The slurm-bridge pods won't start without it, so we must create it first.
+  kubectl --context "kind-${cluster}" create namespace slinky \
+    --dry-run=client -o yaml | kubectl --context "kind-${cluster}" apply -f -
+
+  kubectl --context "kind-${cluster}" apply -f - <<'EOF'
+apiVersion: slinky.slurm.net/v1beta1
+kind: Token
+metadata:
+  name: slurm-bridge-token
+  namespace: slinky
+spec:
+  jwtKeyRef:
+    key: jwt.key
+    name: slurm-auth-jwt
+    namespace: slurm
+  lifetime: 8760h
+  refresh: true
+  secretRef:
+    key: auth-token
+    name: slurm-bridge-token
+  username: slurm
+EOF
+
+  echo "Waiting for slurm-bridge-token secret to be created by slurm-operator..."
+  until kubectl --context "kind-${cluster}" get secret slurm-bridge-token -n slinky &>/dev/null; do
+    sleep 3
+  done
+  echo "slurm-bridge-token secret ready"
+
   helm upgrade --install slurm-bridge "${SLURM_BRIDGE_CHART}" \
     --kube-context "kind-${cluster}" \
-    -n slinky --create-namespace \
+    -n slinky \
     --wait --timeout 120s \
     --values - <<'HELMEOF'
 admission:
@@ -222,27 +253,6 @@ scheduler:
 schedulerConfig:
   partition: slurm-bridge
 HELMEOF
-
-  # Token CR: tells slurm-operator to generate a JWT secret for slurm-bridge to authenticate
-  # against the Slurm REST API. The secret (slurm-bridge-token) is consumed by slurm-bridge-controllers.
-  kubectl --context "kind-${cluster}" apply -f - <<'EOF'
-apiVersion: slinky.slurm.net/v1beta1
-kind: Token
-metadata:
-  name: slurm-bridge-token
-  namespace: slinky
-spec:
-  jwtKeyRef:
-    key: jwt.key
-    name: slurm-auth-jwt
-    namespace: slurm
-  lifetime: 8760h
-  refresh: true
-  secretRef:
-    key: auth-token
-    name: slurm-bridge-token
-  username: slurm
-EOF
 
   kubectl --context "kind-${cluster}" create namespace armada \
     --dry-run=client -o yaml | kubectl --context "kind-${cluster}" apply -f -
