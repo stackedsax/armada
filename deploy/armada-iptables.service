@@ -5,7 +5,8 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/root/armada/deploy/apply-iptables.sh
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash /root/armada/deploy/apply-iptables.sh
 RemainAfterExit=yes
 
 [Install]
