@@ -6,6 +6,7 @@ Requires=docker.service
 [Service]
 Type=oneshot
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=KUBECONFIG=/root/.kube/config
 ExecStart=/bin/bash /root/armada/deploy/apply-iptables.sh
 RemainAfterExit=yes
 
