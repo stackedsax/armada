@@ -154,11 +154,20 @@ setup_slurm_executor() {
     -n slurm \
     --wait --timeout 120s
 
-  # Label worker nodes before installing slurm so slurmd DaemonSet can schedule immediately.
-  for node in $(kubectl --context "kind-${cluster}" get nodes -o name | grep worker); do
+  # Label ALL workers so slurmd DaemonSet runs on them all.
+  # Taint only the last 2 workers to reserve the first 2 for system pods
+  # (slurm-controller StatefulSet needs an untainted node for its local-path PV).
+  local all_workers=()
+  while IFS= read -r node; do all_workers+=("$node"); done \
+    < <(kubectl --context "kind-${cluster}" get nodes -o name | grep worker)
+
+  for node in "${all_workers[@]}"; do
     kubectl --context "kind-${cluster}" label "$node" \
-      scheduler.slinky.slurm.net/slurm-bridge=worker \
-      --overwrite
+      scheduler.slinky.slurm.net/slurm-bridge=worker --overwrite
+  done
+
+  local n="${#all_workers[@]}"
+  for node in "${all_workers[@]:$((n-2))}"; do
     kubectl --context "kind-${cluster}" taint "$node" \
       slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute \
       --overwrite 2>/dev/null || true
