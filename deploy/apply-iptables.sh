@@ -10,11 +10,18 @@
 
 set -euo pipefail
 
-SERVER_IP=$(kubectl --context kind-armada-server get nodes \
-  -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+# Wait for the kind-armada-server API server to be reachable (may take a minute after reboot).
+SERVER_IP=""
+for attempt in $(seq 1 30); do
+  SERVER_IP=$(kubectl --context kind-armada-server get nodes \
+    -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)
+  [[ -n "$SERVER_IP" ]] && break
+  echo "apply-iptables: waiting for kind-armada-server (attempt ${attempt}/30)..."
+  sleep 10
+done
 
 if [[ -z "$SERVER_IP" ]]; then
-  echo "apply-iptables: could not determine kind-armada-server IP, aborting" >&2
+  echo "apply-iptables: timed out waiting for kind-armada-server, aborting" >&2
   exit 1
 fi
 
