@@ -60,6 +60,12 @@ discover_scheduler_url() {
 SCHEDULER_URL="${SCHEDULER_URL:-$(discover_scheduler_url)}"
 echo "Using scheduler URL: ${SCHEDULER_URL}"
 
+# Add helm repos upfront so repo/chart references work without --repo flag collisions.
+# (helm resolves plain chart names as local paths first; repo/chart syntax bypasses that.)
+helm repo add gresearch  https://g-research.github.io/charts        --force-update >/dev/null 2>&1
+helm repo add jetstack   https://charts.jetstack.io                  --force-update >/dev/null 2>&1
+helm repo add scheduler-plugins https://scheduler-plugins.sigs.k8s.io --force-update >/dev/null 2>&1
+
 # ── helpers ────────────────────────────────────────────────────────────────────
 write_kind_config() {
   local name="$1" workers="$2"
@@ -89,9 +95,8 @@ create_cluster_if_missing() {
 
 install_cert_manager() {
   local cluster="$1"
-  helm upgrade --install cert-manager cert-manager \
+  helm upgrade --install cert-manager jetstack/cert-manager \
     --kube-context "kind-${cluster}" \
-    --repo https://charts.jetstack.io \
     -n cert-manager --create-namespace \
     --set crds.enabled=true \
     --version "${CERT_MANAGER_VERSION}" \
@@ -128,8 +133,7 @@ setup_slurm_executor() {
     -n lws-system --create-namespace \
     --wait --timeout 120s
 
-  helm upgrade --install scheduler-plugins scheduler-plugins \
-    --repo https://scheduler-plugins.sigs.k8s.io \
+  helm upgrade --install scheduler-plugins scheduler-plugins/scheduler-plugins \
     --kube-context "kind-${cluster}" \
     --version "${SCHEDULER_PLUGINS_VERSION}" \
     -n scheduler-plugins --create-namespace \
@@ -266,8 +270,7 @@ value: 1000
 globalDefault: false
 EOF
 
-  helm upgrade --install armada-operator armada-operator \
-    --repo https://g-research.github.io/charts \
+  helm upgrade --install armada-operator gresearch/armada-operator \
     --kube-context "kind-${cluster}" \
     --version "${ARMADA_OPERATOR_VERSION}" \
     -n armada --create-namespace \
@@ -337,8 +340,7 @@ value: 1000
 globalDefault: false
 EOF
 
-  helm upgrade --install armada-operator armada-operator \
-    --repo https://g-research.github.io/charts \
+  helm upgrade --install armada-operator gresearch/armada-operator \
     --kube-context "kind-${cluster}" \
     --version "${ARMADA_OPERATOR_VERSION}" \
     -n armada --create-namespace \
