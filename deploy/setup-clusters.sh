@@ -126,12 +126,13 @@ setup_slurm_executor() {
 
   local SLINKY_TOL="tolerations[0].key=slinky.slurm.net/managed-node,tolerations[0].operator=Exists,tolerations[0].effect=NoExecute"
 
+  # jobset uses controller.tolerations (not top-level)
   helm upgrade --install jobset \
     oci://registry.k8s.io/jobset/charts/jobset \
     --kube-context "kind-${cluster}" \
     --version "${JOBSET_VERSION}" \
     -n jobset-system --create-namespace \
-    --set "$SLINKY_TOL" \
+    --set "controller.${SLINKY_TOL}" \
     --wait --timeout 120s
 
   helm upgrade --install lws \
@@ -142,11 +143,13 @@ setup_slurm_executor() {
     --set "$SLINKY_TOL" \
     --wait --timeout 120s
 
+  # scheduler-plugins uses scheduler.tolerations and controller.tolerations
   helm upgrade --install scheduler-plugins scheduler-plugins/scheduler-plugins \
     --kube-context "kind-${cluster}" \
     --version "${SCHEDULER_PLUGINS_VERSION}" \
     -n scheduler-plugins --create-namespace \
-    --set "$SLINKY_TOL" \
+    --set "scheduler.${SLINKY_TOL}" \
+    --set "controller.${SLINKY_TOL}" \
     --wait --timeout 120s
 
   helm upgrade --install slurm-operator-crds \
