@@ -157,16 +157,23 @@ setup_slurm_executor() {
   # Label ALL workers so slurmd DaemonSet runs on them all.
   # Taint only the last 2 workers to reserve the first 2 for system pods
   # (slurm-controller StatefulSet needs an untainted node for its local-path PV).
+  # Remove any pre-existing taints from workers that should stay untainted first,
+  # so that cert-manager and other system components can schedule on them even on re-runs.
   local all_workers=()
   while IFS= read -r node; do all_workers+=("$node"); done \
     < <(kubectl --context "kind-${cluster}" get nodes -o name | grep worker)
+
+  local n="${#all_workers[@]}"
+  for node in "${all_workers[@]:0:$((n-2))}"; do
+    kubectl --context "kind-${cluster}" taint "$node" \
+      slinky.slurm.net/managed-node- 2>/dev/null || true
+  done
 
   for node in "${all_workers[@]}"; do
     kubectl --context "kind-${cluster}" label "$node" \
       scheduler.slinky.slurm.net/slurm-bridge=worker --overwrite
   done
 
-  local n="${#all_workers[@]}"
   for node in "${all_workers[@]:$((n-2))}"; do
     kubectl --context "kind-${cluster}" taint "$node" \
       slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute \
