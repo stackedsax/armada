@@ -95,10 +95,15 @@ create_cluster_if_missing() {
 
 install_cert_manager() {
   local cluster="$1"
+  # Tolerate the slinky managed-node taint so cert-manager can run on all workers
+  # even after slurm-operator marks them as compute nodes.
   helm upgrade --install cert-manager jetstack/cert-manager \
     --kube-context "kind-${cluster}" \
     -n cert-manager --create-namespace \
     --set crds.enabled=true \
+    --set "tolerations[0].key=slinky.slurm.net/managed-node,tolerations[0].operator=Exists,tolerations[0].effect=NoExecute" \
+    --set "webhook.tolerations[0].key=slinky.slurm.net/managed-node,webhook.tolerations[0].operator=Exists,webhook.tolerations[0].effect=NoExecute" \
+    --set "cainjector.tolerations[0].key=slinky.slurm.net/managed-node,cainjector.tolerations[0].operator=Exists,cainjector.tolerations[0].effect=NoExecute" \
     --version "${CERT_MANAGER_VERSION}" \
     --wait --timeout 120s
 }
@@ -119,11 +124,14 @@ setup_slurm_executor() {
 
   install_cert_manager "${cluster}"
 
+  local SLINKY_TOL="tolerations[0].key=slinky.slurm.net/managed-node,tolerations[0].operator=Exists,tolerations[0].effect=NoExecute"
+
   helm upgrade --install jobset \
     oci://registry.k8s.io/jobset/charts/jobset \
     --kube-context "kind-${cluster}" \
     --version "${JOBSET_VERSION}" \
     -n jobset-system --create-namespace \
+    --set "$SLINKY_TOL" \
     --wait --timeout 120s
 
   helm upgrade --install lws \
@@ -131,12 +139,14 @@ setup_slurm_executor() {
     --kube-context "kind-${cluster}" \
     --version "${LWS_VERSION}" \
     -n lws-system --create-namespace \
+    --set "$SLINKY_TOL" \
     --wait --timeout 120s
 
   helm upgrade --install scheduler-plugins scheduler-plugins/scheduler-plugins \
     --kube-context "kind-${cluster}" \
     --version "${SCHEDULER_PLUGINS_VERSION}" \
     -n scheduler-plugins --create-namespace \
+    --set "$SLINKY_TOL" \
     --wait --timeout 120s
 
   helm upgrade --install slurm-operator-crds \
@@ -151,28 +161,20 @@ setup_slurm_executor() {
     --kube-context "kind-${cluster}" \
     --version "${SLURM_OPERATOR_VERSION}" \
     --set crds.enabled=false \
+    --set "$SLINKY_TOL" \
+    --set "webhook.tolerations[0].key=slinky.slurm.net/managed-node,webhook.tolerations[0].operator=Exists,webhook.tolerations[0].effect=NoExecute" \
     -n slurm \
     --wait --timeout 120s
 
-  # Label only the last 2 workers as slurm-bridge nodes.
-  # The slurm-operator NodeSet controller will taint ALL labeled workers with
-  # slinky.slurm.net/managed-node:NoExecute, so workers 1-2 must NOT have the
-  # slurm-bridge label. They remain untainted and available for cert-manager,
-  # armada-operator, and other system pods.
-  # Remove the label (and any stale taint) from workers that should stay free.
+  # Label ALL workers as slurm-bridge nodes so slurmd runs on all of them.
+  # The slurm-operator NodeSet controller taints all labeled workers with
+  # slinky.slurm.net/managed-node:NoExecute. All system pods above are given
+  # a toleration for this taint, so they continue to run on all workers.
   local all_workers=()
   while IFS= read -r node; do all_workers+=("$node"); done \
     < <(kubectl --context "kind-${cluster}" get nodes -o name | grep worker)
 
-  local n="${#all_workers[@]}"
-  for node in "${all_workers[@]:0:$((n-2))}"; do
-    kubectl --context "kind-${cluster}" label "$node" \
-      scheduler.slinky.slurm.net/slurm-bridge- 2>/dev/null || true
-    kubectl --context "kind-${cluster}" taint "$node" \
-      slinky.slurm.net/managed-node- 2>/dev/null || true
-  done
-
-  for node in "${all_workers[@]:$((n-2))}"; do
+  for node in "${all_workers[@]}"; do
     kubectl --context "kind-${cluster}" label "$node" \
       scheduler.slinky.slurm.net/slurm-bridge=worker --overwrite
   done
@@ -257,16 +259,28 @@ admission:
     pullPolicy: Never
     repository: slurm-bridge-admission
     tag: dev
+  tolerations:
+  - key: slinky.slurm.net/managed-node
+    operator: Exists
+    effect: NoExecute
 controllers:
   image:
     pullPolicy: Never
     repository: slurm-bridge-controllers
     tag: dev
+  tolerations:
+  - key: slinky.slurm.net/managed-node
+    operator: Exists
+    effect: NoExecute
 scheduler:
   image:
     pullPolicy: Never
     repository: slurm-bridge-scheduler
     tag: dev
+  tolerations:
+  - key: slinky.slurm.net/managed-node
+    operator: Exists
+    effect: NoExecute
 schedulerConfig:
   partition: slurm-bridge
 HELMEOF
@@ -289,6 +303,7 @@ EOF
     -n armada --create-namespace \
     --set image.repository=gresearch/armada-operator \
     --set image.tag=latest \
+    --set "$SLINKY_TOL" \
     --wait --timeout 120s
 
   kubectl --context "kind-${cluster}" apply -f - <<EOF
@@ -302,6 +317,10 @@ spec:
     repository: ${EXECUTOR_IMAGE_REPO}
     tag: ${EXECUTOR_IMAGE_TAG}
   replicas: 1
+  tolerations:
+  - key: slinky.slurm.net/managed-node
+    operator: Exists
+    effect: NoExecute
   applicationConfig:
     application:
       clusterId: ${cluster_id}
