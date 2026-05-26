@@ -189,6 +189,12 @@ setup_slurm_executor() {
     -n slurm \
     --wait --timeout 300s \
     --values - <<'HELMEOF'
+controller:
+  podSpec:
+    tolerations:
+    - key: slinky.slurm.net/managed-node
+      operator: Exists
+      effect: NoExecute
 nodesets:
   slinky:
     enabled: false
