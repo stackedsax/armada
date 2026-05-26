@@ -303,7 +303,7 @@ EOF
     -n armada --create-namespace \
     --set image.repository=gresearch/armada-operator \
     --set image.tag=latest \
-    --set "$SLINKY_TOL" \
+    --set "controllerManager.tolerations[0].key=slinky.slurm.net/managed-node,controllerManager.tolerations[0].operator=Exists,controllerManager.tolerations[0].effect=NoExecute" \
     --wait --timeout 120s
 
   kubectl --context "kind-${cluster}" apply -f - <<EOF
