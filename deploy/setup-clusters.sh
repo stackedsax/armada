@@ -124,23 +124,32 @@ setup_slurm_executor() {
 
   install_cert_manager "${cluster}"
 
-  local SLINKY_TOL="tolerations[0].key=slinky.slurm.net/managed-node,tolerations[0].operator=Exists,tolerations[0].effect=NoExecute"
+  # Toleration fields — used in separate --set flags to avoid comma-prefix-expansion bugs.
+  # (Bash expansion "prefix.${VAR}" with commas in VAR only prefixes the first entry.)
+  local STOL_KEY="slinky.slurm.net/managed-node"
+  local STOL_OP="Exists"
+  local STOL_EFF="NoExecute"
 
-  # jobset uses controller.tolerations (not top-level)
+  # jobset uses controller.tolerations
   helm upgrade --install jobset \
     oci://registry.k8s.io/jobset/charts/jobset \
     --kube-context "kind-${cluster}" \
     --version "${JOBSET_VERSION}" \
     -n jobset-system --create-namespace \
-    --set "controller.${SLINKY_TOL}" \
+    --set "controller.tolerations[0].key=${STOL_KEY}" \
+    --set "controller.tolerations[0].operator=${STOL_OP}" \
+    --set "controller.tolerations[0].effect=${STOL_EFF}" \
     --wait --timeout 120s
 
+  # lws uses top-level tolerations
   helm upgrade --install lws \
     oci://registry.k8s.io/lws/charts/lws \
     --kube-context "kind-${cluster}" \
     --version "${LWS_VERSION}" \
     -n lws-system --create-namespace \
-    --set "$SLINKY_TOL" \
+    --set "tolerations[0].key=${STOL_KEY}" \
+    --set "tolerations[0].operator=${STOL_OP}" \
+    --set "tolerations[0].effect=${STOL_EFF}" \
     --wait --timeout 120s
 
   # scheduler-plugins uses scheduler.tolerations and controller.tolerations
@@ -148,8 +157,12 @@ setup_slurm_executor() {
     --kube-context "kind-${cluster}" \
     --version "${SCHEDULER_PLUGINS_VERSION}" \
     -n scheduler-plugins --create-namespace \
-    --set "scheduler.${SLINKY_TOL}" \
-    --set "controller.${SLINKY_TOL}" \
+    --set "scheduler.tolerations[0].key=${STOL_KEY}" \
+    --set "scheduler.tolerations[0].operator=${STOL_OP}" \
+    --set "scheduler.tolerations[0].effect=${STOL_EFF}" \
+    --set "controller.tolerations[0].key=${STOL_KEY}" \
+    --set "controller.tolerations[0].operator=${STOL_OP}" \
+    --set "controller.tolerations[0].effect=${STOL_EFF}" \
     --wait --timeout 120s
 
   helm upgrade --install slurm-operator-crds \
@@ -159,13 +172,18 @@ setup_slurm_executor() {
     -n slurm --create-namespace \
     --wait --timeout 120s
 
+  # slurm-operator uses operator.tolerations and webhook.tolerations
   helm upgrade --install slurm-operator \
     oci://ghcr.io/slinkyproject/charts/slurm-operator \
     --kube-context "kind-${cluster}" \
     --version "${SLURM_OPERATOR_VERSION}" \
     --set crds.enabled=false \
-    --set "$SLINKY_TOL" \
-    --set "webhook.tolerations[0].key=slinky.slurm.net/managed-node,webhook.tolerations[0].operator=Exists,webhook.tolerations[0].effect=NoExecute" \
+    --set "operator.tolerations[0].key=${STOL_KEY}" \
+    --set "operator.tolerations[0].operator=${STOL_OP}" \
+    --set "operator.tolerations[0].effect=${STOL_EFF}" \
+    --set "webhook.tolerations[0].key=${STOL_KEY}" \
+    --set "webhook.tolerations[0].operator=${STOL_OP}" \
+    --set "webhook.tolerations[0].effect=${STOL_EFF}" \
     -n slurm \
     --wait --timeout 120s
 
@@ -190,6 +208,12 @@ setup_slurm_executor() {
     --wait --timeout 300s \
     --values - <<'HELMEOF'
 controller:
+  podSpec:
+    tolerations:
+    - key: slinky.slurm.net/managed-node
+      operator: Exists
+      effect: NoExecute
+restapi:
   podSpec:
     tolerations:
     - key: slinky.slurm.net/managed-node
