@@ -32,6 +32,13 @@ apply_rule() {
   iptables -t "$table" -C "$chain" "$@" 2>/dev/null || iptables -t "$table" -A "$chain" "$@"
 }
 
+# Insert a FORWARD rule before DOCKER-FORWARD (position 2) so it isn't shadowed.
+# Docker prepends DOCKER-USER and DOCKER-FORWARD at startup; -A rules appended after
+# those are never reached for DNAT-forwarded traffic.
+insert_forward_rule() {
+  iptables -C FORWARD "$@" 2>/dev/null || iptables -I FORWARD 2 "$@"
+}
+
 declare -A PORTS=([3000]=30000 [8081]=30001 [50051]=30002)
 for pub in "${!PORTS[@]}"; do
   node="${PORTS[$pub]}"
@@ -39,7 +46,7 @@ for pub in "${!PORTS[@]}"; do
   apply_rule nat OUTPUT          -p tcp --dport "$pub"  -j DNAT --to-destination "${SERVER_IP}:${node}"
 done
 
-apply_rule filter FORWARD -s 172.18.0.0/16 -o eth0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-apply_rule filter FORWARD -d 172.18.0.0/16 -i eth0 -j ACCEPT
+insert_forward_rule -i eth0 -d 172.18.0.0/16 -j ACCEPT
+insert_forward_rule -o eth0 -s 172.18.0.0/16 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
 echo "apply-iptables: done"
