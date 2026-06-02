@@ -1,16 +1,13 @@
 # Slurm Integration Demo
 
-This demo shows Armada routing jobs to two different backend pool types from a single
-submission point:
+This demo shows Armada routing jobs to two different backend pool types from a
+single submission point:
 
 - **slurm pool** — jobs are routed to one of two Slurm clusters via
-  [slurm-bridge](https://github.com/SlinkyProject/slurm-bridge); Slurm handles node
-  selection within each cluster
-- **armada pool** — jobs are routed to one of two plain Kubernetes clusters; Armada's
-  scheduler handles node selection directly
-
-Armada distributes load across the two clusters in each pool using its fair-share
-algorithm: it bin-packs until one cluster fills up, then spills over to the second.
+  [slurm-bridge](https://github.com/SlinkyProject/slurm-bridge); Slurm handles
+  node selection within each cluster
+- **armada pool** — jobs are routed to one of two plain Kubernetes clusters;
+  Armada's scheduler handles node selection directly
 
 ## Architecture
 
@@ -33,6 +30,31 @@ algorithm: it bin-packs until one cluster fills up, then spills over to the seco
         ...more clusters can be added to either pool
 ```
 
+## Scheduling behaviour
+
+### Within a pool: bin-packing and cluster-level overflow
+
+Within each pool, Armada bin-packs jobs onto the first available cluster.
+When that cluster fills up, jobs spill to the next cluster in the pool. This
+is what makes multi-cluster pools work: add capacity by adding clusters, and
+Armada distributes the load automatically.
+
+### Across pools: first-fit with overflow, not fair-share
+
+Armada processes pools in config order during each scheduling cycle. The first
+pool's pass claims every job it has capacity for; whatever remains queued is
+picked up by the next pool's pass. This means:
+
+- Jobs targeting **slurm** always go to slurm.
+- Jobs targeting **armada** always go to armada.
+- Jobs with **no pool selector** go to slurm (first in config) until slurm
+  is full, then overflow to armada.
+
+This is **first-fit with overflow**, not fair-share. Armada does not
+automatically balance pool-agnostic jobs across pools — the first pool wins
+until exhausted. To route a job to a specific pool, set the
+`armadaproject.io/pool` nodeSelector explicitly.
+
 ## Hosted demo
 
 A live instance is running at `5.78.201.87`. Configure `armadactl` to point at it:
@@ -53,43 +75,49 @@ EOF
 
 ## Prerequisites (local)
 
-- [armadactl](https://github.com/armadaproject/armada/releases) — download the binary
-  for your platform from the Armada releases page
+- [armadactl](https://github.com/armadaproject/armada/releases) — download the
+  binary for your platform from the Armada releases page
 
 ## Running the demo
 
 Use `scripts/demo-submit.sh` from the repo root (requires `armadactl` configured above):
 
 ```bash
-./scripts/demo-submit.sh all        # run all modes (default)
-./scripts/demo-submit.sh individual # one job per pool
-./scripts/demo-submit.sh mixed      # batch that forces spreading across both clusters
-./scripts/demo-submit.sh any        # jobs with no pool preference — scheduler decides
+./scripts/demo-submit.sh all    # run all modes (default)
+./scripts/demo-submit.sh slurm  # jobs pinned to the Slurm pool
+./scripts/demo-submit.sh armada # jobs pinned to the Armada (K8s) pool
+./scripts/demo-submit.sh mixed  # large-resource batch across both pools
+./scripts/demo-submit.sh any    # jobs with no pool preference (overflow demo)
 ```
 
-**individual**: submits one small job to each pool — useful to show basic routing.
+**slurm**: submits 3 small jobs with `nodeSelector: armadaproject.io/pool: slurm`.
+All three are routed through slurm-bridge to Slurm for execution.
+
+**armada**: submits 3 small jobs with `nodeSelector: armadaproject.io/pool: armada`.
+All three are scheduled directly onto Kubernetes worker nodes.
 
 **mixed**: submits 6 slurm jobs and 5 armada jobs, each requesting 12 CPU. With
-16-CPU worker nodes, only one job fits per node. The slurm pool's first cluster (4
-workers) fills after 4 jobs; the remaining 2 spill to `slurm-executor-2`. The armada
-pool's first cluster (3 workers) fills after 3 jobs; the remaining 2 spill to
-`armada-executor-2`. This demonstrates Armada's cluster-level bin-packing and overflow.
+16-CPU worker nodes, only one job fits per node. The slurm pool's first cluster
+(4 workers) fills after 4 jobs; the remaining 2 spill to `slurm-executor-2`. The
+armada pool's first cluster (3 workers) fills after 3 jobs; the remaining 2 spill
+to `armada-executor-2`. This demonstrates Armada's cluster-level bin-packing and
+overflow within each pool.
 
-**any**: submits 5 small jobs with no `armadaproject.io/pool` nodeSelector. The
-scheduler assigns them to whichever cluster has capacity, showing that Armada can route
-jobs without the submitter specifying a pool.
-
-Watch jobs appear and spread across clusters in Lookout at http://5.78.201.87:3000.
+**any**: submits 10 large jobs (14 CPU each) with no pool selector. The slurm pool
+has 8 workers across two clusters; at 14 CPU per job, one job fits per worker,
+giving slurm a capacity of 8 jobs. The first 8 land on slurm; the remaining 2
+overflow to armada. This demonstrates first-fit with overflow across pools.
 
 ## What to observe
 
-In Lookout, filter by job set to see where each batch landed. For the `mixed` batch:
+In Lookout, filter by job set to see where each batch landed:
 
 - The **Cluster** column shows which executor cluster each job ran on
-- Slurm jobs should appear across both `slurm-executor` and `slurm-executor-2`
-- Armada jobs should appear across both `armada-executor` and `armada-executor-2`
-- Slurm jobs will show `schedulerName: slurm-bridge-scheduler` in their pod spec
-- Armada jobs will show `schedulerName: default-scheduler`
+- For `mixed`: slurm jobs spread across `slurm-executor` and `slurm-executor-2`;
+  armada jobs spread across `armada-executor` and `armada-executor-2`
+- For `any`: first 8 jobs on slurm clusters, last 2 on armada clusters
+- Slurm jobs show `schedulerName: slurm-bridge-scheduler` in their pod spec;
+  armada jobs show `schedulerName: default-scheduler`
 
 ## Setting up your own instance
 

@@ -16,13 +16,14 @@ trap 'rm -rf "$TMPDIR_JOBS"' EXIT
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
-# Build a single-job YAML. $1=pool (or "any"), $2=name, $3=sleep seconds.
+# Build a single-job YAML.
+# $1=pool (or "any"), $2=name, $3=sleep seconds, $4=cpu request, $5=memory request
 # Jobs targeting the slurm pool need a toleration for the slinky managed-node
 # taint that slurm-operator applies to all slurm-executor worker nodes.
 # "any" jobs carry the toleration too so the scheduler is free to place them
 # on either pool.
 job_yaml() {
-  local pool="$1" name="$2" sleep="${3:-60}"
+  local pool="$1" name="$2" sleep="${3:-60}" cpu="${4:-200m}" mem="${5:-128Mi}"
 
   local node_selector=""
   if [[ "$pool" != "any" ]]; then
@@ -47,11 +48,11 @@ ${node_selector}
           args: ["echo Running in pool: ${pool}; sleep ${sleep}"]
           resources:
             requests:
-              cpu: 200m
-              memory: 128Mi
+              cpu: ${cpu}
+              memory: ${mem}
             limits:
-              cpu: 200m
-              memory: 128Mi
+              cpu: ${cpu}
+              memory: ${mem}
 EOF
 }
 
@@ -297,30 +298,31 @@ EOF
   echo "  View at: http://5.78.201.87:3000"
 }
 
-# ── any: no pool preference — scheduler picks a pool ─────────────────────────
-# Jobs carry the slinky toleration so the scheduler is free to assign them to
-# either pool. Armada processes pools in config order, so in practice all jobs
-# will land on whichever pool has capacity first. Use this to show "I don't care
-# which infrastructure runs my job — Armada will find capacity."
+# ── any: no pool preference — first-fit with overflow ────────────────────────
+# Armada schedules pools in config order (slurm first). Each pool's scheduling
+# pass claims as many jobs as its capacity allows; any remainder stays queued for
+# the next pool's pass. This is first-fit with overflow, not fair-share.
+#
+# To make the overflow visible we use large jobs (14 CPU each). The slurm pool
+# has 8 workers (4 per cluster × 2 clusters); at 1 job per worker it can absorb
+# 8 jobs. Submitting 10 guarantees 2 overflow to the armada pool.
 
 submit_any_pool() {
-  echo "Submitting jobs with no pool preference (scheduler fair-shares across Slurm and Armada)..."
+  echo "Submitting 10 large jobs with no pool preference (first-fit with overflow)..."
+  echo "  slurm pool capacity: 8 workers → absorbs jobs 1-8"
+  echo "  jobs 9-10 overflow to armada pool"
   local jobset="demo-any-$(date +%s)-${RANDOM}"
   local jobfile="${TMPDIR_JOBS}/any.yaml"
   {
     echo "queue: ${QUEUE}"
     echo "jobSetId: ${jobset}"
     echo "jobs:"
-    job_yaml any any-job-1 60
-    job_yaml any any-job-2 60
-    job_yaml any any-job-3 60
-    job_yaml any any-job-4 60
-    job_yaml any any-job-5 60
-    job_yaml any any-job-6 60
+    for i in $(seq 1 10); do
+      job_yaml any "any-job-${i}" 60 "14" "20Gi"
+    done
   } > "$jobfile"
   submit_yaml "$jobfile"
   echo "  jobSetId: ${jobset}"
-  echo "  Note: jobs go to whichever pool has capacity (no cross-pool fair-share)"
   echo "  View at: http://5.78.201.87:3000"
 }
 
